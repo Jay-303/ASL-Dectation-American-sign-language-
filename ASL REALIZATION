@@ -1,0 +1,171 @@
+!pip install -q --upgrade keras-cv
+!pip install -q --upgrade keras  # Upgrade to Keras 3.
+
+import os
+
+import json
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+
+import tensorflow as tf
+import keras
+from keras import losses
+from keras import ops
+from keras import optimizers
+from keras.optimizers import schedules
+from keras import metrics
+
+import keras_cv
+
+# Import tensorflow for `tf.data` and its preprocessing functions
+import tensorflow as tf
+import tensorflow_datasets as tfds
+
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+dir_path = "/content/drive/MyDrive/Colab Notebooks/ASL SMALL"
+#dir_path = "/content/drive/MyDrive/Cases/Small Image Datasets/Animal Classification"
+
+BATCH_SIZE = 4
+IMAGE_SIZE = (200, 200)
+AUTOTUNE = tf.data.AUTOTUNE
+tfds.disable_progress_bar()
+train_generator = tf.keras.utils.image_dataset_from_directory(
+    directory=dir_path,  color_mode='rgb',label_mode='int',
+    image_size=IMAGE_SIZE,batch_size=BATCH_SIZE, shuffle=True,subset='training',validation_split=0.2,
+    seed=25)
+validation_generator = tf.keras.utils.image_dataset_from_directory(
+    directory=dir_path, color_mode='rgb',
+    label_mode='int',image_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,shuffle=False,subset='validation',validation_split=0.2,
+    seed=25)
+
+class_names = train_generator.class_names
+print(class_names)
+
+train_ds_shuff = train_generator.shuffle(
+    3*BATCH_SIZE, reshuffle_each_iteration=True
+)
+images = next(iter(train_ds_shuff.take(1)))[0]
+images.shape
+
+keras_cv.visualization.plot_image_gallery(images, value_range=(0, 255))
+
+keras.backend.clear_session()
+
+normalization_layer = tf.keras.layers.Rescaling(1./255)
+normalized_train_ds = train_generator.map(lambda x, y: (normalization_layer(x), y))
+normalized_test_ds = validation_generator.map(lambda x, y: (normalization_layer(x), y))
+
+model = keras_cv.models.ImageClassifier.from_preset(
+    "resnet50_v2_imagenet", num_classes=len(class_names)
+)
+# model.compile(
+#     loss="sparse_categorical_crossentropy",
+#     optimizer=keras.optimizers.SGD(learning_rate=0.01),
+#     metrics=["accuracy"],
+# )
+
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+
+# Save the best model based on validation accuracy
+model_checkpoint_callback = ModelCheckpoint(
+    filepath='best_model.keras',
+    monitor='val_accuracy',
+    mode='max',
+    save_best_only=True,
+    verbose=2
+)
+
+# Early stopping to prevent overfitting
+early_stopping = EarlyStopping(
+    monitor='val_loss',
+    min_delta=1e-4,
+    patience=15,
+    verbose=2,
+    restore_best_weights=True
+)
+
+# Reduce learning rate if validation loss plateaus
+reduce_lr = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=5,
+    min_lr=1e-6,
+    verbose=2
+)
+model.build((None, IMAGE_SIZE[0], IMAGE_SIZE[1], 3))
+
+
+model.summary()
+
+model.compile(
+    loss="sparse_categorical_crossentropy",
+    optimizer=keras.optimizers.SGD(learning_rate=0.01),
+    metrics=["accuracy"],
+)
+
+r = model.fit(
+    normalized_train_ds,
+    validation_data=normalized_test_ds,
+    epochs=20,
+    callbacks=[model_checkpoint_callback, early_stopping, reduce_lr]  # Combined callbacks
+)
+
+
+from tensorflow.keras.models import load_model
+
+# Load the best model saved during training
+best_model = load_model('best_model.keras')
+
+
+best_model
+
+
+model.save_weights('/content/drive/MyDrive/Colab Notebooks/best_model.weights.h5')
+
+logloss, acc = model.evaluate(normalized_test_ds)
+print("Accuracy: ", acc)
+print("Logloss: ", logloss)
+
+plt.plot(r.history['loss'], label='loss')
+plt.plot(r.history['val_loss'], label='val_loss')
+plt.legend()
+plt.show()
+
+plt.plot(r.history['accuracy'], label='Accuracy')
+plt.plot(r.history['val_accuracy'], label='Validation Accuracy')
+plt.legend()
+plt.show()
+
+from PIL import Image
+import numpy as np
+
+# Load the image
+#path = "/content/drive/MyDrive/Colab Notebooks/dataset/Deer/Deer_12_2.jpg"
+path = "/content/drive/MyDrive/Colab Notebooks/ASL SMALL/del/del1.jpg"
+image = Image.open(path)
+
+# Convert the image to a numpy array
+image = np.array(image)
+
+# Normalize the image
+image = image / 255.0
+
+# Add a batch dimension
+image = np.expand_dims(image, axis=0)
+
+resizing = keras_cv.layers.Resizing(
+    IMAGE_SIZE[0], IMAGE_SIZE[1], crop_to_aspect_ratio=True
+)
+
+np_im_rs = resizing(image)
+np_im_rs.shape
+
+predictions = model.predict(np_im_rs)
+predictions
+
+print("Top class is:", class_names[np.argmax(predictions[0])])
