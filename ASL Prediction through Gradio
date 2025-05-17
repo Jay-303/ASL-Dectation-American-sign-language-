@@ -1,0 +1,38 @@
+
+import tensorflow as tf
+from tensorflow import keras
+import numpy as np
+import matplotlib.pyplot as plt
+import gradio as gr
+import keras_cv
+from PIL import Image
+
+
+
+model = keras.models.load_model("/content/drive/MyDrive/Colab Notebooks/best_model.weights.h5")
+
+class_names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'del', 'nothing', 'space']
+def classify_image(path):
+  image = Image.open(path)
+
+  # Convert the image to a numpy array
+  image = np.array(image)
+
+  # Normalize the image
+  image = image / 255.0
+
+  # Add a batch dimension
+  image = np.expand_dims(image, axis=0)
+
+  resizing = keras_cv.layers.Resizing(
+    200, 200, crop_to_aspect_ratio=True
+  )
+  np_im_rs = resizing(image)
+
+  predictions = model.predict(np_im_rs)
+  return class_names[np.argmax(predictions[0])]
+
+
+gr.Interface(fn=classify_image,
+             inputs=gr.Image(type="filepath"),
+             outputs="text").launch(debug='True')
